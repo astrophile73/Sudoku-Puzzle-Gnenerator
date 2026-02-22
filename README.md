@@ -5,6 +5,7 @@ Generate print-ready Sudoku puzzle books for Amazon KDP with puzzles, solutions,
 ## Features
 - Sizes: 6x6, 9x9, 16x16
 - Difficulty: Easy, Medium, Hard, Expert
+- Per-size/per-difficulty puzzle counts and layouts
 - Unique-solution puzzle generation
 - KDP preset trim sizes
 - Interior PDF with puzzles + solutions

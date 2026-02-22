@@ -29,9 +29,8 @@ TRIM_SIZES = [
     ("8.27 x 11.69 in", (8.27, 11.69)),
 ]
 
-
-def _layout_for_size(size, layout_map):
-    return layout_map[size]
+SIZES = [6, 9, 16]
+DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert"]
 
 
 def _pages_needed(puzzle_count, rows, cols):
@@ -44,18 +43,43 @@ st.title("Sudoku Book Generator for Amazon KDP")
 
 with st.sidebar:
     st.header("Puzzle Settings")
-    size = st.selectbox("Sudoku size", [6, 9, 16], index=1)
-    difficulty = st.selectbox("Difficulty", ["Easy", "Medium", "Hard", "Expert"], index=1)
-    puzzle_count = st.number_input("Number of puzzles", min_value=1, max_value=2000, value=100, step=10)
     seed_text = st.text_input("Random seed (optional)", value="")
 
-    st.header("Layout (Per Size)")
-    rows_6 = st.number_input("6x6 rows per page", min_value=1, max_value=6, value=2, step=1, key="rows_6")
-    cols_6 = st.number_input("6x6 cols per page", min_value=1, max_value=6, value=2, step=1, key="cols_6")
-    rows_9 = st.number_input("9x9 rows per page", min_value=1, max_value=6, value=2, step=1, key="rows_9")
-    cols_9 = st.number_input("9x9 cols per page", min_value=1, max_value=6, value=2, step=1, key="cols_9")
-    rows_16 = st.number_input("16x16 rows per page", min_value=1, max_value=6, value=1, step=1, key="rows_16")
-    cols_16 = st.number_input("16x16 cols per page", min_value=1, max_value=6, value=1, step=1, key="cols_16")
+    st.header("Puzzle Mix")
+    counts = {size: {} for size in SIZES}
+    layouts = {size: {} for size in SIZES}
+    for size in SIZES:
+        with st.expander(f"{size}x{size} settings", expanded=(size == 9)):
+            for difficulty in DIFFICULTIES:
+                default_count = 10 if (size == 9 and difficulty == "Easy") else 0
+                col_count, col_rows, col_cols = st.columns([2, 1, 1])
+                count = col_count.number_input(
+                    f"{difficulty} puzzles",
+                    min_value=0,
+                    max_value=2000,
+                    value=default_count,
+                    step=5,
+                    key=f"count_{size}_{difficulty}",
+                )
+                default_layout = 1 if size == 16 else 2
+                rows = col_rows.number_input(
+                    f"{difficulty} rows",
+                    min_value=1,
+                    max_value=6,
+                    value=default_layout,
+                    step=1,
+                    key=f"rows_{size}_{difficulty}",
+                )
+                cols = col_cols.number_input(
+                    f"{difficulty} cols",
+                    min_value=1,
+                    max_value=6,
+                    value=default_layout,
+                    step=1,
+                    key=f"cols_{size}_{difficulty}",
+                )
+                counts[size][difficulty] = int(count)
+                layouts[size][difficulty] = (int(rows), int(cols))
 
     st.header("Book Size")
     trim_label = st.selectbox("Trim size (KDP presets)", [label for label, _ in TRIM_SIZES], index=4)
@@ -87,14 +111,19 @@ with st.sidebar:
     )
     safe_in = st.number_input("Safe margin (in)", min_value=0.1, max_value=0.5, value=0.25, step=0.01)
 
-layout_map = {
-    6: (int(rows_6), int(cols_6)),
-    9: (int(rows_9), int(cols_9)),
-    16: (int(rows_16), int(cols_16)),
-}
-rows, cols = _layout_for_size(size, layout_map)
+sections = []
+total_puzzles = 0
+puzzle_pages = 0
+for size in SIZES:
+    for difficulty in DIFFICULTIES:
+        count = counts[size][difficulty]
+        if count <= 0:
+            continue
+        rows, cols = layouts[size][difficulty]
+        puzzle_pages += _pages_needed(count, rows, cols)
+        total_puzzles += count
+        sections.append((size, difficulty, count, rows, cols))
 
-puzzle_pages = _pages_needed(puzzle_count, rows, cols)
 solution_pages = puzzle_pages
 total_pages = puzzle_pages + solution_pages
 
@@ -103,15 +132,18 @@ st.write(
     "Optionally generate a KDP-sized cover PDF."
 )
 st.info(
-    f"Estimated interior pages: {total_pages} "
+    f"Total puzzles: {total_puzzles} | Estimated interior pages: {total_pages} "
     f"({puzzle_pages} puzzle pages + {solution_pages} solution pages)"
 )
 
 generate = st.button("Generate PDFs", type="primary")
 
 if generate:
+    if total_puzzles == 0:
+        st.error("Please add at least one puzzle count to generate a book.")
+        st.stop()
+
     rng = random.Random(seed_text) if seed_text else random.Random()
-    spec = spec_for_size(size)
 
     progress = st.progress(0)
     status = st.empty()
@@ -125,25 +157,59 @@ if generate:
         warnings.append((index, target, actual))
 
     with st.spinner("Building puzzles and PDFs..."):
-        puzzles, solutions = generate_puzzles(
-            count=puzzle_count,
-            spec=spec,
-            difficulty=difficulty,
-            rng=rng,
-            progress_cb=_progress_cb,
-            warn_cb=_warn_cb,
-        )
+        puzzle_sections = []
+        solution_sections = []
+        progress_state = {"done": 0}
+        start_index = 0
+
+        for size, difficulty, count, rows, cols in sections:
+            section_label = f"{size}x{size} {difficulty}"
+            spec = spec_for_size(size)
+            section_state = {"done": 0}
+
+            def _section_progress_cb(done, total, _label=section_label):
+                progress_state["done"] += done - section_state["done"]
+                section_state["done"] = done
+                _progress_cb(progress_state["done"], total_puzzles)
+
+            def _section_warn_cb(index, target, actual, _label=section_label):
+                warnings.append((_label, index, target, actual))
+
+            puzzles, solutions = generate_puzzles(
+                count=count,
+                spec=spec,
+                difficulty=difficulty,
+                rng=rng,
+                progress_cb=_section_progress_cb,
+                warn_cb=_section_warn_cb,
+            )
+
+            puzzle_sections.append(
+                {
+                    "title": section_label,
+                    "spec": spec,
+                    "layout": (rows, cols),
+                    "items": puzzles,
+                    "start_index": start_index,
+                }
+            )
+            solution_sections.append(
+                {
+                    "title": f"{section_label} Solutions",
+                    "spec": spec,
+                    "layout": (rows, cols),
+                    "items": solutions,
+                    "start_index": start_index,
+                }
+            )
+            start_index += count
 
         interior_pdf = build_interior_pdf(
-            puzzles=puzzles,
-            solutions=solutions,
-            spec=spec,
+            puzzle_sections=puzzle_sections,
+            solution_sections=solution_sections,
             trim_size=(trim_w, trim_h),
             margin_in=margin_in,
-            layout=(rows, cols),
             include_page_numbers=include_page_numbers,
-            title="Sudoku Puzzles",
-            solutions_title="Solutions",
         )
 
         cover_pdf = None
@@ -169,8 +235,8 @@ if generate:
             "Closest valid puzzles were used instead."
         )
         with st.expander("Show clue count details"):
-            for idx, target, actual in warnings[:50]:
-                st.write(f"Puzzle {idx}: target {target}, actual {actual}")
+            for section_label, idx, target, actual in warnings[:50]:
+                st.write(f"{section_label} – Puzzle {idx}: target {target}, actual {actual}")
             if len(warnings) > 50:
                 st.write(f"...and {len(warnings) - 50} more.")
 

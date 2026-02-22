@@ -49,6 +49,7 @@ def _draw_page(
     title=None,
     include_page_numbers=False,
     page_number=None,
+    item_label="Puzzle",
 ):
     page_w, page_h = page_size
     rows, cols = layout
@@ -74,7 +75,7 @@ def _draw_page(
         label_y = bottom + grid_size + 6
         if label_y < page_h - margin_pt:
             c.setFont("Helvetica", 9)
-            c.drawString(left, label_y, f"Puzzle {puzzle_number}")
+            c.drawString(left, label_y, f"{item_label} {puzzle_number}")
         _draw_grid(c, grid, left, bottom, grid_size, spec, show_all=show_all)
 
     if include_page_numbers and page_number is not None:
@@ -83,15 +84,11 @@ def _draw_page(
 
 
 def build_interior_pdf(
-    puzzles,
-    solutions,
-    spec,
+    puzzle_sections,
+    solution_sections,
     trim_size,
     margin_in,
-    layout,
     include_page_numbers=True,
-    title="Sudoku Puzzles",
-    solutions_title="Solutions",
 ):
     page_w = trim_size[0] * inch
     page_h = trim_size[1] * inch
@@ -100,45 +97,58 @@ def build_interior_pdf(
     buffer = BytesIO()
     c = canvas.Canvas(buffer, pagesize=(page_w, page_h))
 
-    per_page = layout[0] * layout[1]
     page_num = 1
-    for start in range(0, len(puzzles), per_page):
-        page_items = puzzles[start : start + per_page]
-        page_title = title if start == 0 else None
-        _draw_page(
-            c,
-            page_items,
-            spec,
-            (page_w, page_h),
-            margin_pt,
-            layout,
-            start_index=start,
-            show_all=False,
-            title=page_title,
-            include_page_numbers=include_page_numbers,
-            page_number=page_num,
-        )
-        c.showPage()
-        page_num += 1
+    for section in puzzle_sections:
+        items = section["items"]
+        spec = section["spec"]
+        layout = section["layout"]
+        start_index = section["start_index"]
+        per_page = layout[0] * layout[1]
+        for start in range(0, len(items), per_page):
+            page_items = items[start : start + per_page]
+            page_title = section["title"] if start == 0 else None
+            _draw_page(
+                c,
+                page_items,
+                spec,
+                (page_w, page_h),
+                margin_pt,
+                layout,
+                start_index=start_index + start,
+                show_all=False,
+                title=page_title,
+                include_page_numbers=include_page_numbers,
+                page_number=page_num,
+                item_label="Puzzle",
+            )
+            c.showPage()
+            page_num += 1
 
-    for start in range(0, len(solutions), per_page):
-        page_items = solutions[start : start + per_page]
-        page_title = solutions_title if start == 0 else None
-        _draw_page(
-            c,
-            page_items,
-            spec,
-            (page_w, page_h),
-            margin_pt,
-            layout,
-            start_index=start,
-            show_all=True,
-            title=page_title,
-            include_page_numbers=include_page_numbers,
-            page_number=page_num,
-        )
-        c.showPage()
-        page_num += 1
+    for section in solution_sections:
+        items = section["items"]
+        spec = section["spec"]
+        layout = section["layout"]
+        start_index = section["start_index"]
+        per_page = layout[0] * layout[1]
+        for start in range(0, len(items), per_page):
+            page_items = items[start : start + per_page]
+            page_title = section["title"] if start == 0 else None
+            _draw_page(
+                c,
+                page_items,
+                spec,
+                (page_w, page_h),
+                margin_pt,
+                layout,
+                start_index=start_index + start,
+                show_all=True,
+                title=page_title,
+                include_page_numbers=include_page_numbers,
+                page_number=page_num,
+                item_label="Solution",
+            )
+            c.showPage()
+            page_num += 1
 
     c.save()
     buffer.seek(0)
