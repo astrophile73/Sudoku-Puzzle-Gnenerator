@@ -33,6 +33,13 @@ SIZES = [6, 9, 16]
 DIFFICULTIES = ["Easy", "Medium", "Hard", "Expert"]
 
 
+def _layout_from_per_page(per_page):
+    per_page = max(1, int(per_page))
+    rows = max(1, int(math.floor(math.sqrt(per_page))))
+    cols = int(math.ceil(per_page / rows))
+    return rows, cols
+
+
 def _pages_needed(puzzle_count, rows, cols):
     per_page = max(1, rows * cols)
     return int(math.ceil(puzzle_count / per_page))
@@ -47,13 +54,22 @@ with st.sidebar:
 
     st.header("Puzzle Mix")
     counts = {size: {} for size in SIZES}
-    layouts = {size: {} for size in SIZES}
+    per_page_by_size = {}
     for size in SIZES:
         with st.expander(f"{size}x{size} settings", expanded=(size == 9)):
+            per_page_default = 1 if size == 16 else 4
+            per_page = st.number_input(
+                "Puzzles per page",
+                min_value=1,
+                max_value=36,
+                value=per_page_default,
+                step=1,
+                key=f"per_page_{size}",
+            )
+            per_page_by_size[size] = int(per_page)
             for difficulty in DIFFICULTIES:
                 default_count = 10 if (size == 9 and difficulty == "Easy") else 0
-                col_count, col_rows, col_cols = st.columns([2, 1, 1])
-                count = col_count.number_input(
+                count = st.number_input(
                     f"{difficulty} puzzles",
                     min_value=0,
                     max_value=2000,
@@ -61,25 +77,7 @@ with st.sidebar:
                     step=5,
                     key=f"count_{size}_{difficulty}",
                 )
-                default_layout = 1 if size == 16 else 2
-                rows = col_rows.number_input(
-                    f"{difficulty} rows",
-                    min_value=1,
-                    max_value=6,
-                    value=default_layout,
-                    step=1,
-                    key=f"rows_{size}_{difficulty}",
-                )
-                cols = col_cols.number_input(
-                    f"{difficulty} cols",
-                    min_value=1,
-                    max_value=6,
-                    value=default_layout,
-                    step=1,
-                    key=f"cols_{size}_{difficulty}",
-                )
                 counts[size][difficulty] = int(count)
-                layouts[size][difficulty] = (int(rows), int(cols))
 
     st.header("Book Size")
     trim_label = st.selectbox("Trim size (KDP presets)", [label for label, _ in TRIM_SIZES], index=4)
@@ -115,11 +113,11 @@ sections = []
 total_puzzles = 0
 puzzle_pages = 0
 for size in SIZES:
+    rows, cols = _layout_from_per_page(per_page_by_size[size])
     for difficulty in DIFFICULTIES:
         count = counts[size][difficulty]
         if count <= 0:
             continue
-        rows, cols = layouts[size][difficulty]
         puzzle_pages += _pages_needed(count, rows, cols)
         total_puzzles += count
         sections.append((size, difficulty, count, rows, cols))
