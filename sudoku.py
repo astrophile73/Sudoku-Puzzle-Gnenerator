@@ -1,4 +1,5 @@
 import random
+import time
 from dataclasses import dataclass
 
 
@@ -29,6 +30,73 @@ CLUE_RANGES = {
         "Expert": (80, 99),
     },
 }
+
+SOLVER_NODE_LIMITS = {
+    6: {
+        "Easy": None,
+        "Medium": None,
+        "Hard": None,
+        "Expert": None,
+    },
+    9: {
+        "Easy": None,
+        "Medium": None,
+        "Hard": None,
+        "Expert": None,
+    },
+    16: {
+        "Easy": 18000,
+        "Medium": 12000,
+        "Hard": 7000,
+        "Expert": 4500,
+    },
+}
+
+PUZZLE_TIME_LIMITS_SEC = {
+    6: {
+        "Easy": None,
+        "Medium": None,
+        "Hard": None,
+        "Expert": None,
+    },
+    9: {
+        "Easy": None,
+        "Medium": None,
+        "Hard": None,
+        "Expert": None,
+    },
+    16: {
+        "Easy": 0.8,
+        "Medium": 1.0,
+        "Hard": 1.2,
+        "Expert": 1.5,
+    },
+}
+
+MAX_GENERATION_TRIES = {
+    6: {
+        "Easy": 35,
+        "Medium": 35,
+        "Hard": 35,
+        "Expert": 35,
+    },
+    9: {
+        "Easy": 35,
+        "Medium": 35,
+        "Hard": 35,
+        "Expert": 35,
+    },
+    16: {
+        "Easy": 6,
+        "Medium": 4,
+        "Hard": 2,
+        "Expert": 1,
+    },
+}
+
+
+class SearchBudgetExceeded(Exception):
+    pass
 
 
 def spec_for_size(size):
@@ -122,7 +190,22 @@ def _select_cell(grid, spec, row_mask, col_mask, box_mask, full_mask):
     return best
 
 
-def _count_solutions(grid, spec, row_mask, col_mask, box_mask, full_mask, limit):
+def _count_solutions(
+    grid,
+    spec,
+    row_mask,
+    col_mask,
+    box_mask,
+    full_mask,
+    limit,
+    node_limit=None,
+    node_counter=None,
+):
+    if node_limit is not None:
+        node_counter[0] += 1
+        if node_counter[0] > node_limit:
+            raise SearchBudgetExceeded
+
     choice = _select_cell(grid, spec, row_mask, col_mask, box_mask, full_mask)
     if choice is None:
         return 1
@@ -138,7 +221,17 @@ def _count_solutions(grid, spec, row_mask, col_mask, box_mask, full_mask, limit)
         row_mask[r] |= bit
         col_mask[c] |= bit
         box_mask[_box_index(r, c, spec)] |= bit
-        count += _count_solutions(grid, spec, row_mask, col_mask, box_mask, full_mask, limit)
+        count += _count_solutions(
+            grid,
+            spec,
+            row_mask,
+            col_mask,
+            box_mask,
+            full_mask,
+            limit,
+            node_limit=node_limit,
+            node_counter=node_counter,
+        )
         row_mask[r] ^= bit
         col_mask[c] ^= bit
         box_mask[_box_index(r, c, spec)] ^= bit
@@ -148,47 +241,90 @@ def _count_solutions(grid, spec, row_mask, col_mask, box_mask, full_mask, limit)
     return count
 
 
-def count_solutions(grid, spec, limit=2):
+def count_solutions(grid, spec, limit=2, node_limit=None):
     row_mask, col_mask, box_mask = _init_masks(grid, spec)
     full_mask = (1 << spec.size) - 1
-    return _count_solutions(grid, spec, row_mask, col_mask, box_mask, full_mask, limit)
+    node_counter = [0]
+    try:
+        return _count_solutions(
+            grid,
+            spec,
+            row_mask,
+            col_mask,
+            box_mask,
+            full_mask,
+            limit,
+            node_limit=node_limit,
+            node_counter=node_counter,
+        )
+    except SearchBudgetExceeded:
+        return None
 
 
 def _count_clues(grid):
     return sum(1 for row in grid for val in row if val != 0)
 
 
-def _remove_numbers(puzzle, spec, target_clues, rng):
+def _remove_numbers(puzzle, spec, target_clues, rng, node_limit=None, deadline_ts=None):
     size = spec.size
     positions = [(r, c) for r in range(size) for c in range(size)]
     rng.shuffle(positions)
     clues = _count_clues(puzzle)
+    budget_hits = 0
+    timed_out = False
     for r, c in positions:
+        if deadline_ts is not None and time.perf_counter() >= deadline_ts:
+            timed_out = True
+            break
         if clues <= target_clues:
             break
         if clues - 1 < target_clues:
             continue
         backup = puzzle[r][c]
         puzzle[r][c] = 0
-        if count_solutions(puzzle, spec, limit=2) != 1:
+        sol_count = count_solutions(puzzle, spec, limit=2, node_limit=node_limit)
+        if sol_count != 1:
             puzzle[r][c] = backup
+            if sol_count is None:
+                budget_hits += 1
         else:
             clues -= 1
-    return puzzle, clues
+    return puzzle, clues, budget_hits, timed_out
 
 
-def generate_puzzle(spec, target_clues, rng, max_tries=35):
+def generate_puzzle(
+    spec,
+    target_clues,
+    rng,
+    max_tries=35,
+    node_limit=None,
+    time_limit_sec=None,
+):
     best = None
     best_diff = None
     for _ in range(max_tries):
         solution = _generate_full_solution(spec, rng)
         puzzle = [row[:] for row in solution]
-        puzzle, clues = _remove_numbers(puzzle, spec, target_clues, rng)
+        deadline_ts = None
+        if time_limit_sec is not None:
+            deadline_ts = time.perf_counter() + time_limit_sec
+        puzzle, clues, budget_hits, timed_out = _remove_numbers(
+            puzzle,
+            spec,
+            target_clues,
+            rng,
+            node_limit=node_limit,
+            deadline_ts=deadline_ts,
+        )
         diff = abs(clues - target_clues)
+        meta = {
+            "budget_hits": budget_hits,
+            "timed_out": timed_out,
+        }
         if diff == 0:
-            return puzzle, solution, clues, True
+            return puzzle, solution, clues, True, meta
         if best is None or diff < best_diff:
-            best = (puzzle, solution, clues, False)
+            best = (puzzle, solution, clues, False, meta)
             best_diff = diff
     return best
 
@@ -202,15 +338,32 @@ def generate_puzzles(count, spec, difficulty, rng=None, progress_cb=None, warn_c
         raise ValueError("Unsupported difficulty.")
 
     low, high = CLUE_RANGES[spec.size][difficulty]
+    node_limit = SOLVER_NODE_LIMITS[spec.size][difficulty]
+    time_limit_sec = PUZZLE_TIME_LIMITS_SEC[spec.size][difficulty]
+    max_tries = MAX_GENERATION_TRIES[spec.size][difficulty]
     puzzles = []
     solutions = []
     for idx in range(count):
         target = rng.randint(low, high)
-        puzzle, solution, clues, exact = generate_puzzle(spec, target, rng)
+        puzzle, solution, clues, exact, meta = generate_puzzle(
+            spec,
+            target,
+            rng,
+            max_tries=max_tries,
+            node_limit=node_limit,
+            time_limit_sec=time_limit_sec,
+        )
         puzzles.append(puzzle)
         solutions.append(solution)
         if not exact and warn_cb:
-            warn_cb(idx + 1, target, clues)
+            reason = "clue-target drift"
+            if meta["timed_out"] and meta["budget_hits"] > 0:
+                reason = "time limit + solver budget"
+            elif meta["timed_out"]:
+                reason = "time limit"
+            elif meta["budget_hits"] > 0:
+                reason = "solver budget"
+            warn_cb(idx + 1, target, clues, reason)
         if progress_cb:
             progress_cb(idx + 1, count)
     return puzzles, solutions

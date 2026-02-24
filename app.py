@@ -147,9 +147,12 @@ if generate:
     status = st.empty()
     warnings = []
 
-    def _progress_cb(done, total):
+    def _progress_cb(done, total, detail=None):
         progress.progress(min(1.0, done / max(1, total)))
-        status.write(f"Generating puzzles {done}/{total}...")
+        if detail:
+            status.write(f"{detail} | Overall {done}/{total}")
+        else:
+            status.write(f"Generating puzzles {done}/{total}...")
 
     def _warn_cb(index, target, actual):
         warnings.append((index, target, actual))
@@ -168,10 +171,14 @@ if generate:
             def _section_progress_cb(done, total, _label=section_label):
                 progress_state["done"] += done - section_state["done"]
                 section_state["done"] = done
-                _progress_cb(progress_state["done"], total_puzzles)
+                _progress_cb(
+                    progress_state["done"],
+                    total_puzzles,
+                    detail=f"Generating {_label}: {done}/{count}",
+                )
 
-            def _section_warn_cb(index, target, actual, _label=section_label):
-                warnings.append((_label, index, target, actual))
+            def _section_warn_cb(index, target, actual, reason=None, _label=section_label):
+                warnings.append((_label, index, target, actual, reason))
 
             puzzles, solutions = generate_puzzles(
                 count=count,
@@ -233,8 +240,11 @@ if generate:
             "Closest valid puzzles were used instead."
         )
         with st.expander("Show clue count details"):
-            for section_label, idx, target, actual in warnings[:50]:
-                st.write(f"{section_label} – Puzzle {idx}: target {target}, actual {actual}")
+            for section_label, idx, target, actual, reason in warnings[:50]:
+                if reason:
+                    st.write(f"{section_label} - Puzzle {idx}: target {target}, actual {actual} ({reason})")
+                else:
+                    st.write(f"{section_label} - Puzzle {idx}: target {target}, actual {actual}")
             if len(warnings) > 50:
                 st.write(f"...and {len(warnings) - 50} more.")
 
