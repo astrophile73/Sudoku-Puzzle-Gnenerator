@@ -40,9 +40,9 @@ SOLVER_NODE_LIMITS = {
     },
     9: {
         "Easy": None,
-        "Medium": None,
-        "Hard": None,
-        "Expert": None,
+        "Medium": 20000,
+        "Hard": 12000,
+        "Expert": 7000,
     },
     16: {
         "Easy": 18000,
@@ -61,9 +61,9 @@ PUZZLE_TIME_LIMITS_SEC = {
     },
     9: {
         "Easy": None,
-        "Medium": None,
-        "Hard": None,
-        "Expert": None,
+        "Medium": 1.2,
+        "Hard": 1.4,
+        "Expert": 1.8,
     },
     16: {
         "Easy": 0.8,
@@ -87,10 +87,10 @@ MAX_GENERATION_TRIES = {
         "Expert": 35,
     },
     16: {
-        "Easy": 6,
-        "Medium": 4,
-        "Hard": 2,
-        "Expert": 1,
+        "Easy": 35,
+        "Medium": 35,
+        "Hard": 35,
+        "Expert": 35,
     },
 }
 
