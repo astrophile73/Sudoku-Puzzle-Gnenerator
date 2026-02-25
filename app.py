@@ -8,6 +8,14 @@ import streamlit as st
 from cover import build_cover_pdf
 from pdf_utils import build_interior_pdf
 from sudoku import generate_puzzles, spec_for_size
+from kdp_specs import (
+    KDP_MIN_OUTSIDE_TOP_BOTTOM_IN,
+    build_margin_spec_no_bleed,
+    compute_even_page_count,
+    required_inside_margin_no_bleed,
+    validate_page_count,
+)
+from fonts import ensure_fonts_registered
 
 
 TRIM_SIZES = [
@@ -82,7 +90,22 @@ with st.sidebar:
     st.header("Book Size")
     trim_label = st.selectbox("Trim size (KDP presets)", [label for label, _ in TRIM_SIZES], index=4)
     trim_w, trim_h = dict(TRIM_SIZES)[trim_label]
-    margin_in = st.number_input("Interior margin (in)", min_value=0.25, max_value=1.5, value=0.5, step=0.05)
+    margin_in = st.number_input(
+        "Outside/Top/Bottom margin (in)",
+        min_value=KDP_MIN_OUTSIDE_TOP_BOTTOM_IN,
+        max_value=1.5,
+        value=0.5,
+        step=0.05,
+        help="KDP minimum is 0.25 in. Inside (gutter) is computed from page count.",
+    )
+    extra_gutter_in = st.number_input(
+        "Extra gutter (inside) (in)",
+        min_value=0.0,
+        max_value=1.0,
+        value=0.0,
+        step=0.05,
+        help="Added on top of the KDP-required inside margin.",
+    )
     include_page_numbers = st.checkbox("Include page numbers", value=True)
 
     st.header("Cover")
@@ -123,18 +146,86 @@ for size in SIZES:
         sections.append((size, difficulty, count, rows, cols))
 
 solution_pages = puzzle_pages
-total_pages = puzzle_pages + solution_pages
+raw_total_pages = puzzle_pages + solution_pages
+total_pages_even = compute_even_page_count(raw_total_pages)
+required_inside = required_inside_margin_no_bleed(total_pages_even)
+margins = build_margin_spec_no_bleed(
+    page_count_even=total_pages_even,
+    outside_top_bottom_in=margin_in,
+    extra_gutter_in=extra_gutter_in,
+)
 
 st.write(
     "Configure your book and generate a print-ready interior PDF with puzzles and solutions. "
     "Optionally generate a KDP-sized cover PDF."
 )
 st.info(
-    f"Total puzzles: {total_puzzles} | Estimated interior pages: {total_pages} "
-    f"({puzzle_pages} puzzle pages + {solution_pages} solution pages)"
+    f"Total puzzles: {total_puzzles} | Estimated interior pages: {raw_total_pages} "
+    f"(rounded to {total_pages_even} for print)"
 )
 
-generate = st.button("Generate PDFs", type="primary")
+preflight_errors = []
+preflight_warnings = []
+
+# Fonts must be embeddable for KDP.
+try:
+    font_label = ensure_fonts_registered()
+    preflight_warnings.append(f"Using embedded fonts: {font_label}")
+except Exception as exc:
+    preflight_errors.append(f"Fonts: {exc}")
+
+preflight_errors.extend(validate_page_count(total_pages_even))
+
+# Margin checks (no-bleed).
+if margins.outside_in < KDP_MIN_OUTSIDE_TOP_BOTTOM_IN:
+    preflight_errors.append("Outside/Top/Bottom margin is below 0.25 in.")
+if margins.inside_in < required_inside:
+    preflight_errors.append("Inside (gutter) margin is below the KDP requirement.")
+
+# Layout fit checks (conservative): ensure grids + minimum font can fit inside the content rect.
+page_w_pt = trim_w * 72.0
+page_h_pt = trim_h * 72.0
+outside_pt = margins.outside_in * 72.0
+inside_pt = margins.inside_in * 72.0
+avail_w = page_w_pt - outside_pt - inside_pt
+avail_h_total = page_h_pt - margins.top_in * 72.0 - margins.bottom_in * 72.0
+header_h = 20.0
+footer_h = 14.0 if include_page_numbers else 0.0
+label_h = 11.0
+padding = 6.0
+
+if avail_w <= 0 or avail_h_total <= 0:
+    preflight_errors.append("Margins are too large for this trim size.")
+else:
+    for size, difficulty, count, rows, cols in sections:
+        # Each section has a title on its first page, so we preflight with header reserved.
+        avail_h = avail_h_total - header_h - footer_h
+        cell_w = avail_w / cols
+        cell_h = avail_h / rows
+        grid_size = min(cell_w, cell_h - label_h) - padding
+        if grid_size <= 0:
+            preflight_errors.append(
+                f"{size}x{size} {difficulty}: layout {rows}x{cols} does not fit. Reduce puzzles-per-page or use a larger trim size."
+            )
+            continue
+        cell = grid_size / size
+        # Digit font is ~0.55*cell, and 16x16 uses a 0.85 scale.
+        scale = 0.55 * (0.85 if size >= 10 else 1.0)
+        if cell * scale < 7.0:
+            preflight_errors.append(
+                f"{size}x{size} {difficulty}: cells are too small for 7pt minimum. Reduce puzzles-per-page or increase trim size."
+            )
+
+if preflight_errors:
+    st.error("KDP Preflight: FAIL")
+    for msg in preflight_errors:
+        st.write(f"- {msg}")
+else:
+    st.success("KDP Preflight: PASS")
+    for msg in preflight_warnings:
+        st.caption(msg)
+
+generate = st.button("Generate PDFs", type="primary", disabled=bool(preflight_errors))
 
 if generate:
     if total_puzzles == 0:
@@ -214,14 +305,16 @@ if generate:
             solution_sections=solution_sections,
             trim_size=(trim_w, trim_h),
             margin_in=margin_in,
+            inside_margin_in=margins.inside_in,
             include_page_numbers=include_page_numbers,
+            force_even_pages=True,
         )
 
         cover_pdf = None
         if include_cover:
             cover_pdf = build_cover_pdf(
                 trim_size=(trim_w, trim_h),
-                page_count=total_pages,
+                page_count=total_pages_even,
                 bleed_in=bleed_in,
                 spine_in=spine_in,
                 safe_in=safe_in,

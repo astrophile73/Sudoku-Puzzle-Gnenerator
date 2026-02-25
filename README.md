@@ -21,3 +21,7 @@ streamlit run app.py
 ## Notes
 - Enter the spine width manually; KDP formulas vary by paper type and region.
 - Always validate PDFs against current KDP specs before publishing.
+
+## KDP Interior Font Embedding
+- For best KDP results, add `assets/fonts/NotoSans-Regular.ttf` and `assets/fonts/NotoSans-Bold.ttf`.
+- If they are missing, the app will try system fonts (DejaVu on Linux, Arial on Windows).
