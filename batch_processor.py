@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import random
+import traceback
 from dataclasses import dataclass, field
 from io import BytesIO
 from typing import Any, Callable
@@ -181,7 +182,7 @@ def process_batch(
             result.warnings = book_warnings
 
         except Exception as exc:  # pylint: disable=broad-except
-            result.error = str(exc)
+            result.error = f"{type(exc).__name__}: {exc}\n{traceback.format_exc()}"
 
         results.append(result)
 

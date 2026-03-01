@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -180,7 +180,7 @@ QUICK_TEMPLATES: dict[str, dict[str, Any]] = {
 
 def config_to_json(config: dict[str, Any]) -> str:
     """Serialize configuration to a JSON string."""
-    config["saved_at"] = datetime.utcnow().isoformat() + "Z"
+    config["saved_at"] = datetime.now(timezone.utc).isoformat()
     return json.dumps(config, indent=2)
 
 
